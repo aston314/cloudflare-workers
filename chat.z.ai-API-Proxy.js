@@ -1,7 +1,7 @@
 /**
  * @file Cloudflare Worker for chat.z.ai API Proxy
  * @author (Your Name or Alias)
- * @version 1.0.0
+ * @version 1.1.0 (Fixed content duplication issue)
  *
  * @description
  * 这是一个部署在 Cloudflare Workers 上的代理脚本，旨在将符合 OpenAI API 格式的请求
@@ -18,6 +18,7 @@
  * 4.  **双重认证模式**: 提供了灵活的认证机制，既支持为所有用户设置一个统一的访问密钥，
  *     也支持让用户直接使用自己的 chat.z.ai 令牌。
  * 5.  **流式与非流式支持**: 同时支持流式（server-sent events）和非流式（JSON）响应。
+ * 6.  **内容去重**: 修复了上游API在从思考转为回答阶段时，会重复发送思考内容的问题。
  *
  * ---
  *
@@ -212,7 +213,7 @@ async function handleChatCompletions(request, env) {
 }
 
 // =================================================================
-// 核心流处理函数 - 更新版
+// 核心流处理函数 - 修复版
 // =================================================================
 async function streamUpstreamToOpenAI(readableStream, writable, options) {
     const { DEBUG_MODE, THINK_TAGS_MODE, requestedModel } = options;
@@ -252,12 +253,7 @@ async function streamUpstreamToOpenAI(readableStream, writable, options) {
                 
                 if (data.done || data.phase === 'done') {
                     // 通用结束处理
-                    const endChunk = {
-                        id: `chatcmpl-${Date.now()}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
-                        model: requestedModel, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-                    };
-                    await writer.write(encoder.encode(`data: ${JSON.stringify(endChunk)}\n\n`));
-                    break;
+                    break; // 直接跳出循环，最后统一发送 [DONE]
                 }
 
                 const phase = data.phase;
@@ -306,8 +302,22 @@ async function streamUpstreamToOpenAI(readableStream, writable, options) {
                         streamState = 'answering';
                         debugLog(DEBUG_MODE, "进入回答阶段");
                     }
-                    // `edit_content` 可能包含完整的思考过程，需要清理
-                    const answerText = transformThinking(content, "strip");
+                    
+                    // <<< FIX START >>>
+                    // 核心修复逻辑：处理从 thinking 到 answer 的过渡块，它包含了重复的思考过程。
+                    // 我们通过查找 '</details>' 标签来定位并只取真正的回答部分。
+                    let processedContent = content;
+                    const detailsEndTag = '</details>';
+                    const detailsEndIndex = processedContent.indexOf(detailsEndTag);
+                    
+                    if (detailsEndIndex !== -1) {
+                        // 如果找到了 'details' 结束标签，说明这是那个特殊的过渡块
+                        // 我们只取标签之后的内容
+                        processedContent = processedContent.substring(detailsEndIndex + detailsEndTag.length);
+                    }
+                    // <<< FIX END >>>
+
+                    const answerText = transformThinking(processedContent, "strip");
                     if (answerText) {
                         const answerChunk = {
                             id: `chatcmpl-${Date.now()}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
@@ -323,13 +333,21 @@ async function streamUpstreamToOpenAI(readableStream, writable, options) {
             }
         }
     }
+    
+    // 发送最终的 finish_reason chunk
+    const endChunk = {
+        id: `chatcmpl-${Date.now()}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: requestedModel, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    };
+    await writer.write(encoder.encode(`data: ${JSON.stringify(endChunk)}\n\n`));
+
     // 确保流在任何情况下都正确关闭
     await writer.write(encoder.encode('data: [DONE]\n\n'));
     await writer.close();
 }
 
 
-// --- 辅助函数 (保持不变) ---
+// --- 辅助函数 ---
 
 async function aggregateStream(readableStream, options) {
     const { DEBUG_MODE, THINK_TAGS_MODE } = options;
@@ -337,6 +355,8 @@ async function aggregateStream(readableStream, options) {
     const decoder = new TextDecoder();
     let fullContent = '';
     let buffer = '';
+    let hasCleanedFirstAnswerChunk = false; // 状态标志，确保只清理一次
+
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -351,18 +371,34 @@ async function aggregateStream(readableStream, options) {
             if (!dataStr) continue;
             try {
                 const upstreamData = JSON.parse(dataStr);
-                const content = upstreamData.data?.delta_content || upstreamData.data?.edit_content || '';
-                if (content) {
-                    // 非流式下，只累加最终答案
-                    if (upstreamData.data?.phase === 'answer') {
-                        fullContent += transformThinking(content, "strip");
+                if (upstreamData.data?.phase === 'answer') {
+                    let content = upstreamData.data?.delta_content || upstreamData.data?.edit_content || '';
+                    
+                    // <<< FIX START >>>
+                    // 为非流式响应添加同样的修复逻辑
+                    if (!hasCleanedFirstAnswerChunk) {
+                        const detailsEndTag = '</details>';
+                        const detailsEndIndex = content.indexOf(detailsEndTag);
+                        if (detailsEndIndex !== -1) {
+                            content = content.substring(detailsEndIndex + detailsEndTag.length);
+                            hasCleanedFirstAnswerChunk = true; // 标记已清理
+                        }
+                    }
+                    // <<< FIX END >>>
+
+                    if (content) {
+                       fullContent += transformThinking(content, "strip");
                     }
                 }
-                if (upstreamData.data?.done || upstreamData.data?.phase === 'done') return fullContent;
+                if (upstreamData.data?.done || upstreamData.data?.phase === 'done') {
+                    // 清理最终结果中可能残留的未剥离的标签
+                    return transformThinking(fullContent, "strip");
+                }
             } catch (e) { /* 忽略解析错误 */ }
         }
     }
-    return fullContent;
+    // 清理最终结果中可能残留的未剥离的标签
+    return transformThinking(fullContent, "strip");
 }
 
 function transformThinking(s, mode) {
