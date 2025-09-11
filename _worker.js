@@ -6,7 +6,7 @@
  * @description
  * 这是一个部署在 Cloudflare Workers 上的代理脚本，旨在将符合 OpenAI API 格式的请求
  * 转换为 chat.z.ai 的 API 格式，并返回兼容 OpenAI 的响应。
- *
+ * 
  * 主要功能:
  * 1.  **OpenAI API 兼容**: 提供 /v1/models 和 /v1/chat/completions 两个标准端点，
  *     可直接接入各种支持 OpenAI API 的客户端。
