@@ -84,6 +84,11 @@ const THINK_TAGS_MODE_DEFAULT = "strip"; // 必须是 strip 才能正确提取�
 const UPSTREAM_MODEL_ID = "0727-360B-API";
 const UPSTREAM_MODEL_NAME = "GLM-4.5";
 
+// <<< 修正点 1：添加缺失的常量 >>>
+const SEC_CH_UA = "\"Not;A=Brand\";v=\"99\", \"Microsoft Edge\";v=\"139\", \"Chromium\";v=\"139\"";
+const SEC_CH_UA_MOB = "?0";
+const SEC_CH_UA_PLAT = "\"Windows\"";
+
 // --- 伪装浏览器头部 ---
 const BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",
@@ -91,6 +96,10 @@ const BROWSER_HEADERS = {
     "Accept-Language": "zh-CN",
     "X-FE-Version": "prod-fe-1.0.70",
     "Origin": "https://chat.z.ai",
+    // <<< 修正点 2：将常量添加到头部对象中 >>>
+    "sec-ch-ua": SEC_CH_UA,
+    "sec-ch-ua-mobile": SEC_CH_UA_MOB,
+    "sec-ch-ua-platform": SEC_CH_UA_PLAT,
 };
 
 export default {
