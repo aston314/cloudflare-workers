@@ -3,7 +3,6 @@
  * @version 1.1.1 (Fixed Missing signature header issue)
  */
 
-
 // --- 配置 ---
 const UPSTREAM_URL_DEFAULT = "https://chat.z.ai/api/chat/completions";
 const DEBUG_MODE_DEFAULT = "false";
