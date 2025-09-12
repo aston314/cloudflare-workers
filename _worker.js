@@ -103,63 +103,63 @@ async function handleChatCompletions(request, env) {
     const { DEFAULT_KEY, UPSTREAM_TOKEN } = env;
 
     // --- 修复后的认证逻辑 ---
-    // if (DEFAULT_KEY && UPSTREAM_TOKEN) {
-    //     debugLog(DEBUG_MODE, "检测到固定Key模式");
-    //     if (clientKey !== DEFAULT_KEY) {
-    //         debugLog(DEBUG_MODE, `认证失败: 客户端Key不匹配`);
-    //         return new Response('Invalid API key.', { status: 401, headers: corsHeaders() });
-    //     }
-    //     upstreamToken = UPSTREAM_TOKEN;
-    //     debugLog(DEBUG_MODE, `使用固定的UPSTREAM_TOKEN`);
-    // } else {
-    //     debugLog(DEBUG_MODE, "使用动态Token模式，尝试获取匿名token");
-    //     // 关键修复：优先使用匿名token
-    //     if (ANON_TOKEN_ENABLED) {
-    //         try {
-    //             upstreamToken = await getAnonymousToken();
-    //             debugLog(DEBUG_MODE, "匿名token获取成功");
-    //         } catch (error) {
-    //             debugLog(DEBUG_MODE, "匿名token获取失败，使用用户提供的token");
-    //             upstreamToken = clientKey;
-    //         }
-    //     } else {
-    //         upstreamToken = clientKey;
+    if (DEFAULT_KEY && UPSTREAM_TOKEN) {
+        debugLog(DEBUG_MODE, "检测到固定Key模式");
+        if (clientKey !== DEFAULT_KEY) {
+            debugLog(DEBUG_MODE, `认证失败: 客户端Key不匹配`);
+            return new Response('Invalid API key.', { status: 401, headers: corsHeaders() });
+        }
+        upstreamToken = UPSTREAM_TOKEN;
+        debugLog(DEBUG_MODE, `使用固定的UPSTREAM_TOKEN`);
+    } else {
+        debugLog(DEBUG_MODE, "使用动态Token模式，尝试获取匿名token");
+        // 关键修复：优先使用匿名token
+        if (ANON_TOKEN_ENABLED) {
+            try {
+                upstreamToken = await getAnonymousToken();
+                debugLog(DEBUG_MODE, "匿名token获取成功");
+            } catch (error) {
+                debugLog(DEBUG_MODE, "匿名token获取失败，使用用户提供的token");
+                upstreamToken = clientKey;
+            }
+        } else {
+            upstreamToken = clientKey;
+        }
+    }
+
+    // // 1. 逻辑起点：最优先检查并尝试获取匿名Token
+    // if (ANON_TOKEN_ENABLED) {
+    //     debugLog(DEBUG_MODE, "检测到匿名Token已启用，优先尝试获取...");
+    //     try {
+    //         upstreamToken = await getAnonymousToken(); // 假设 getAnonymousToken 是一个已定义的异步函数
+    //         debugLog(DEBUG_MODE, "匿名Token获取成功，将直接使用此Token");
+    //     } catch (error) {
+    //         debugLog(DEBUG_MODE, `匿名Token获取失败: ${error.message}。将回退到标准认证逻辑。`);
+    //         // 此处不需要做任何事，upstreamToken 保持 undefined，程序会自然进入下面的回退逻辑
     //     }
     // }
 
-    // 1. 逻辑起点：最优先检查并尝试获取匿名Token
-    if (ANON_TOKEN_ENABLED) {
-        debugLog(DEBUG_MODE, "检测到匿名Token已启用，优先尝试获取...");
-        try {
-            upstreamToken = await getAnonymousToken(); // 假设 getAnonymousToken 是一个已定义的异步函数
-            debugLog(DEBUG_MODE, "匿名Token获取成功，将直接使用此Token");
-        } catch (error) {
-            debugLog(DEBUG_MODE, `匿名Token获取失败: ${error.message}。将回退到标准认证逻辑。`);
-            // 此处不需要做任何事，upstreamToken 保持 undefined，程序会自然进入下面的回退逻辑
-        }
-    }
+    // // 2. 回退逻辑：如果匿名Token获取失败或未启用(即 upstreamToken 仍未被赋值)
+    // if (!upstreamToken) {
+    //     debugLog(DEBUG_MODE, "未通过匿名Token认证，执行标准认证流程...");
 
-    // 2. 回退逻辑：如果匿名Token获取失败或未启用(即 upstreamToken 仍未被赋值)
-    if (!upstreamToken) {
-        debugLog(DEBUG_MODE, "未通过匿名Token认证，执行标准认证流程...");
-
-        // 2a. 检查是否为“固定Key模式”
-        if (DEFAULT_KEY && UPSTREAM_TOKEN) {
-            debugLog(DEBUG_MODE, "进入固定Key模式认证");
-            if (clientKey !== DEFAULT_KEY) {
-                debugLog(DEBUG_MODE, `认证失败: 客户端Key不匹配`);
-                return new Response('Invalid API key.', { status: 401, headers: corsHeaders() });
-            }
-            upstreamToken = UPSTREAM_TOKEN;
-            debugLog(DEBUG_MODE, `认证成功，使用固定的UPSTREAM_TOKEN`);
-        } 
-        // 2b. 如果不是固定Key模式，则为“用户Key代理模式”
-        else {
-            debugLog(DEBUG_MODE, "进入用户Key代理模式");
-            upstreamToken = clientKey;
-            debugLog(DEBUG_MODE, `将使用用户提供的Key作为upstreamToken`);
-        }
-    }
+    //     // 2a. 检查是否为“固定Key模式”
+    //     if (DEFAULT_KEY && UPSTREAM_TOKEN) {
+    //         debugLog(DEBUG_MODE, "进入固定Key模式认证");
+    //         if (clientKey !== DEFAULT_KEY) {
+    //             debugLog(DEBUG_MODE, `认证失败: 客户端Key不匹配`);
+    //             return new Response('Invalid API key.', { status: 401, headers: corsHeaders() });
+    //         }
+    //         upstreamToken = UPSTREAM_TOKEN;
+    //         debugLog(DEBUG_MODE, `认证成功，使用固定的UPSTREAM_TOKEN`);
+    //     } 
+    //     // 2b. 如果不是固定Key模式，则为“用户Key代理模式”
+    //     else {
+    //         debugLog(DEBUG_MODE, "进入用户Key代理模式");
+    //         upstreamToken = clientKey;
+    //         debugLog(DEBUG_MODE, `将使用用户提供的Key作为upstreamToken`);
+    //     }
+    // }
 
     let openaiRequest;
     try {
