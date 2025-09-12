@@ -1,62 +1,31 @@
 /**
  * @file Cloudflare Worker for chat.z.ai API Proxy
  * @author (Your Name or Alias)
- * @version 1.1.2 (Fixed upstream request body structure and headers)
+ * @version 1.1.3 (Fixed function declaration order, headers, and body structure)
  *
- 
  * @description
  * 这是一个部署在 Cloudflare Workers 上的代理脚本，旨在将符合 OpenAI API 格式的请求
  * 转换为 chat.z.ai 的 API 格式，并返回兼容 OpenAI 的响应。
  * 
  * 主要功能:
- * 1.  **OpenAI API 兼容**: 提供 /v1/models 和 /v1/chat/completions 两个标准端点，
- *     可直接接入各种支持 OpenAI API 的客户端。
+ * 1.  **OpenAI API 兼容**: 提供 /v1/models 和 /v1/chat/completions 两个标准端点。
  * 2.  **模拟思考过程**: 将 chat.z.ai 特有的 "thinking" 阶段，巧妙地转换为 OpenAI
- *     的 `tool_calls` 格式。这使得在支持的客户端UI上，可以实时展示模型的思考步骤，
- *     极大地提升了用户体验。
- * 3.  **模型固定**: 所有传入的聊天请求，无论客户端指定何种模型，都会被强制代理到
- *     后端的 GLM-4.5 模型。
- * 4.  **双重认证模式**: 提供了灵活的认证机制，既支持为所有用户设置一个统一的访问密钥，
- *     也支持让用户直接使用自己的 chat.z.ai 令牌。
- * 5.  **流式与非流式支持**: 同时支持流式（server-sent events）和非流式（JSON）响应。
- * 6.  **内容去重**: 修复了上游API在从思考转为回答阶段时，会重复发送思考内容的问题。
+ *     的 `tool_calls` 格式，极大地提升了用户体验。
+ * 3.  **模型固定**: 所有传入的聊天请求都会被强制代理到后端的 GLM-4.5 模型。
+ * 4.  **双重认证模式**: 支持固定密钥或用户动态令牌两种认证方式。
+ * 5.  **流式与非流式支持**: 同时支持流式和非流式响应。
+ * 6.  **内容去重**: 修复了上游API在从思考转为回答阶段时重复发送内容的问题。
  *
  * ---
  *
  * 环境变量设置 (Cloudflare Worker -> Settings -> Variables):
  *
- * ### 认证模式配置 (二选一)
- *
- * #### 模式一: 固定密钥模式 (推荐用于公开分享)
- *   - 设置 `DEFAULT_KEY` 和 `UPSTREAM_TOKEN` 这两个变量。
+ * #### 模式一: 固定密钥模式 (推荐)
  *   - **DEFAULT_KEY**: 客户端访问此 Worker 时必须提供的 API Key。
- *     - 示例: `sk-my-custom-key-for-all-users`
  *   - **UPSTREAM_TOKEN**: Worker 用于访问上游 chat.z.ai 的固定令牌。
- *     - 示例: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` (从 chat.z.ai 获取的真实令牌)
- *   - **工作流程**: 用户请求时 `Authorization` 头必须是 `Bearer sk-my-custom-key...`，
- *     Worker 验证通过后，会使用 `UPSTREAM_TOKEN` 去请求 chat.z.ai。
  *
- * #### 模式二: 动态令牌模式 (用于自用或授权用户)
+ * #### 模式二: 动态令牌模式 (自用)
  *   - **不要** 设置 `DEFAULT_KEY` 和 `UPSTREAM_TOKEN`。
- *   - **工作流程**: Worker 会直接将客户端请求头 `Authorization` 中的 Bearer Token
- *     透传给上游 chat.z.ai。用户需要自行提供有效的 chat.z.ai 令牌。
- *
- * ### 其他可选配置
- *
- *   - **UPSTREAM_URL**: (可选) chat.z.ai 的 API 地址。
- *     - 默认值: `https://chat.z.ai/api/chat/completions`
- *
- *   - **DEBUG_MODE**: (可选) 是否开启调试模式，在 Worker 日志中输出详细信息。
- *     - 默认值: `false`
- *     - 示例值: `true`
- *
- *   - **DEFAULT_STREAM**: (可选) 当客户端请求中未明确指定 `stream` 参数时，默认是否使用流式响应。
- *     - 默认值: `true`
- *     - 示例值: `false`
- *
- *   - **THINK_TAGS_MODE**: (可选) 处理思考标签的模式。为了正确模拟 `tool_calls`，
- *     此值应保持默认。
- *     - 默认值: `strip` (剥离 `<thinking>` 等标签)
  *
  */
 
@@ -64,17 +33,17 @@
 // Cloudflare Worker for chat.z.ai
 // =================================================
 
-// --- 配置 (环境变量，如果未设置则使用默认值) ---
+// --- 配置 ---
 const UPSTREAM_URL_DEFAULT = "https://chat.z.ai/api/chat/completions";
 const DEBUG_MODE_DEFAULT = "false";
 const DEFAULT_STREAM_DEFAULT = "true";
 const THINK_TAGS_MODE_DEFAULT = "strip"; 
 
-// --- 上游模型信息 (硬编码为GLM-4.5) ---
+// --- 上游模型信息 ---
 const UPSTREAM_MODEL_ID = "0727-360B-API";
 const UPSTREAM_MODEL_NAME = "GLM-4.5";
 
-// --- 伪装浏览器头部 (修正: 添加了完整的浏览器签名头部) ---
+// --- 伪装浏览器头部 ---
 const SEC_CH_UA = "\"Not;A=Brand\";v=\"99\", \"Microsoft Edge\";v=\"139\", \"Chromium\";v=\"139\"";
 const SEC_CH_UA_MOB = "?0";
 const SEC_CH_UA_PLAT = "\"Windows\"";
@@ -90,23 +59,9 @@ const BROWSER_HEADERS = {
     "sec-ch-ua-platform": SEC_CH_UA_PLAT,
 };
 
-export default {
-    async fetch(request, env, ctx) {
-        if (request.method === 'OPTIONS') {
-            return handleOptions();
-        }
-
-        const url = new URL(request.url);
-        switch (url.pathname) {
-            case '/v1/models':
-                return handleModels(request);
-            case '/v1/chat/completions':
-                return handleChatCompletions(request, env);
-            default:
-                return new Response('Not Found', { status: 404 });
-        }
-    },
-};
+// =================================================================
+// 核心处理函数定义 (在 export default 之前)
+// =================================================================
 
 function handleOptions() {
     return new Response(null, { headers: corsHeaders() });
@@ -123,7 +78,6 @@ function handleModels(request) {
 }
 
 async function handleChatCompletions(request, env) {
-    // 读取环境变量或使用默认值
     const UPSTREAM_URL = env.UPSTREAM_URL || UPSTREAM_URL_DEFAULT;
     const DEBUG_MODE = (env.DEBUG_MODE || DEBUG_MODE_DEFAULT) === "true";
     const DEFAULT_STREAM = (env.DEFAULT_STREAM || DEFAULT_STREAM_DEFAULT) === "true";
@@ -139,7 +93,6 @@ async function handleChatCompletions(request, env) {
     let upstreamToken;
     const { DEFAULT_KEY, UPSTREAM_TOKEN } = env;
 
-    // --- 认证逻辑 ---
     if (DEFAULT_KEY && UPSTREAM_TOKEN) {
         debugLog(DEBUG_MODE, "检测到固定Key模式");
         if (clientKey !== DEFAULT_KEY) {
@@ -165,71 +118,43 @@ async function handleChatCompletions(request, env) {
     debugLog(DEBUG_MODE, `请求模型: ${requestedModel}, 代理到: ${UPSTREAM_MODEL_NAME}, 流式: ${useStream}`);
     
     const chatID = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const msgID = `${Date.now()}`;
-
-    // <<< 核心修正点: 使用完整、详细的请求体结构 >>>
+    
     const upstreamRequest = {
         stream: true,
         chat_id: chatID,
-        id: msgID,
+        id: `${Date.now()}`,
         model: UPSTREAM_MODEL_ID,
         messages: openaiRequest.messages,
-        params: {
-            top_p: 0.95,
-            temperature: 0.6,
-            max_tokens: 80000
-        },
+        params: { top_p: 0.95, temperature: 0.6, max_tokens: 80000 },
         features: {
-            enable_thinking: true,
-            image_generation: false,
-            web_search: false,
-            auto_web_search: false,
-            preview_mode: false
+            enable_thinking: true, image_generation: false, web_search: false,
+            auto_web_search: false, preview_mode: false
         },
-        background_tasks: {
-            title_generation: false,
-            tags_generation: false
-        },
+        background_tasks: { title_generation: false, tags_generation: false },
         mcp_servers: [],
         model_item: {
-            id: UPSTREAM_MODEL_ID,
-            name: UPSTREAM_MODEL_NAME,
-            owned_by: "openai",
-            openai: {
-                id: UPSTREAM_MODEL_ID,
-                name: UPSTREAM_MODEL_ID,
-                owned_by: "openai",
-                openai: { id: UPSTREAM_MODEL_ID },
-                urlIdx: 1
-            },
+            id: UPSTREAM_MODEL_ID, name: UPSTREAM_MODEL_NAME, owned_by: "openai",
+            openai: { id: UPSTREAM_MODEL_ID, name: UPSTREAM_MODEL_ID, owned_by: "openai", openai: { id: UPSTREAM_MODEL_ID }, urlIdx: 1 },
             urlIdx: 1,
             info: {
-                id: UPSTREAM_MODEL_ID,
-                user_id: "api-user",
-                base_model_id: null,
-                name: UPSTREAM_MODEL_NAME,
+                id: UPSTREAM_MODEL_ID, user_id: "api-user", base_model_id: null, name: UPSTREAM_MODEL_NAME,
                 params: { top_p: 0.95, temperature: 0.6 },
                 meta: {
-                    profile_image_url: "/static/favicon.png",
-                    description: "Most advanced model, proficient in coding and tool use",
+                    profile_image_url: "/static/favicon.png", description: "Most advanced model, proficient in coding and tool use",
                     capabilities: {
-                        vision: false, citations: false, preview_mode: false,
-                        web_search: false, language_detection: false, restore_n_source: false,
-                        mcp: true, file_qa: true, returnFc: true, returnThink: true, think: true
+                        vision: false, citations: false, preview_mode: false, web_search: false,
+                        language_detection: false, restore_n_source: false, mcp: true,
+                        file_qa: true, returnFc: true, returnThink: true, think: true
                     }
                 }
             }
         },
         tool_servers: [],
         variables: {
-            "{{USER_NAME}}": `Guest-${Date.now()}`,
-            "{{USER_LOCATION}}": "Unknown",
-            "{{CURRENT_DATETIME}}": new Date().toLocaleString('zh-CN'),
-            "{{CURRENT_DATE}}": new Date().toLocaleDateString('zh-CN'),
-            "{{CURRENT_TIME}}": new Date().toLocaleTimeString('zh-CN'),
-            "{{CURRENT_WEEKDAY}}": new Date().toLocaleDateString('zh-CN', { weekday: 'long' }),
-            "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-            "{{USER_LANGUAGE}}": "zh-CN"
+            "{{USER_NAME}}": `Guest-${Date.now()}`, "{{USER_LOCATION}}": "Unknown",
+            "{{CURRENT_DATETIME}}": new Date().toLocaleString('zh-CN'), "{{CURRENT_DATE}}": new Date().toLocaleDateString('zh-CN'),
+            "{{CURRENT_TIME}}": new Date().toLocaleTimeString('zh-CN'), "{{CURRENT_WEEKDAY}}": new Date().toLocaleDateString('zh-CN', { weekday: 'long' }),
+            "{{CURRENT_TIMEZONE}}": "Asia/Shanghai", "{{USER_LANGUAGE}}": "zh-CN"
         }
     };
 
@@ -272,10 +197,10 @@ async function handleChatCompletions(request, env) {
     }
 }
 
+// =================================================================
+// 流处理与辅助函数
+// =================================================================
 
-// =================================================================
-// 核心流处理与辅助函数
-// =================================================================
 async function streamUpstreamToOpenAI(readableStream, writable, options) {
     const { DEBUG_MODE, THINK_TAGS_MODE, requestedModel } = options;
     const writer = writable.getWriter();
@@ -393,7 +318,6 @@ async function streamUpstreamToOpenAI(readableStream, writable, options) {
     await writer.close();
 }
 
-
 async function aggregateStream(readableStream, options) {
     const { DEBUG_MODE } = options;
     const reader = readableStream.getReader();
@@ -463,3 +387,22 @@ function corsHeaders() {
 function debugLog(isDebug, message) {
     if (isDebug) console.log(`[DEBUG] ${new Date().toISOString()}: ${message}`);
 }
+
+// --- Worker 入口点 ---
+export default {
+    async fetch(request, env, ctx) {
+        if (request.method === 'OPTIONS') {
+            return handleOptions();
+        }
+
+        const url = new URL(request.url);
+        switch (url.pathname) {
+            case '/v1/models':
+                return handleModels(request);
+            case '/v1/chat/completions':
+                return handleChatCompletions(request, env);
+            default:
+                return new Response('Not Found', { status: 404 });
+        }
+    },
+};
