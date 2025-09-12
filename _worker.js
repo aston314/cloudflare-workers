@@ -88,10 +88,14 @@ const UPSTREAM_MODEL_NAME = "GLM-4.5";
 const BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",
     "Accept": "application/json, text/event-stream",
-    "Accept-Language": "zh-CN",
+    "Accept-Language": "zh-CN,zh;q=0.9",  // 修复：添加权重参数
     "X-FE-Version": "prod-fe-1.0.70",
+    "sec-ch-ua": "\"Not;A=Brand\";v=\"99\", \"Microsoft Edge\";v=\"139\", \"Chromium\";v=\"139\"",  // 新增：关键签名头部
+    "sec-ch-ua-mobile": "?0",  // 新增：移动设备标识
+    "sec-ch-ua-platform": "\"Windows\"",  // 新增：平台标识
     "Origin": "https://chat.z.ai",
 };
+
 
 export default {
     async fetch(request, env, ctx) {
@@ -175,7 +179,7 @@ async function handleChatCompletions(request, env) {
         chat_id: chatID, id: `${Date.now()}`,
     };
     
-    const upstreamResponse = await fetch(UPSTREAM_URL, {
+    const upstreamResponse_ = await fetch(UPSTREAM_URL, {
         method: 'POST',
         headers: {
             ...BROWSER_HEADERS, 'Content-Type': 'application/json',
@@ -183,6 +187,17 @@ async function handleChatCompletions(request, env) {
         },
         body: JSON.stringify(upstreamRequest),
     });
+    
+const upstreamResponse = await fetch(UPSTREAM_URL, {
+    method: 'POST',
+    headers: {
+        ...BROWSER_HEADERS,
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${upstreamToken}`,
+        'Referer': `https://chat.z.ai/c/${chatID}`,  // 保持这个动态 Referer
+    },
+    body: JSON.stringify(upstreamRequest),
+});
 
     if (!upstreamResponse.ok) {
         const errorBody = await upstreamResponse.text();
