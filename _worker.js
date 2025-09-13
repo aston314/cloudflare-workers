@@ -25,8 +25,73 @@ const BROWSER_HEADERS = {
     "Origin": "https://chat.z.ai",
 };
 
-// --- 关键：添加匿名token获取功能 ---
+let tokenCache = {
+    token: null,      // 用于存储获取到的 token
+    expires: 0        // 用于存储 token 的过期时间戳 (毫秒)
+};
+
+// --- 修改/替换：getAnonymousToken 函数 ---
+
+/**
+ * 核心函数：从上游服务器获取一个新的匿名 Token。
+ * (原 getAnonymousToken 的逻辑)
+ */
+async function fetchNewAnonymousToken() {
+  try {
+    const response = await fetch(`https://chat.z.ai/api/v1/auths/`, {
+      method: "GET",
+      headers: {
+                ...BROWSER_HEADERS,
+                "Referer": "https://chat.z.ai/"
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Anonymous token request failed with status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data.token) {
+      throw new Error("Anonymous token is empty");
+    }
+    
+    return data.token;
+  } catch (error) {
+    console.log("获取新匿名token失败: %v", error);
+    throw error; // 将错误向上抛出
+  }
+}
+
+/**
+ * 带缓存的包装函数：获取匿名 Token。
+ * 优先从缓存中读取，缓存失效或不存在时才调用 fetchNewAnonymousToken。
+ */
 async function getAnonymousToken() {
+    // --- 核心配置：设置一个保守的 1 分钟缓存时间 ---
+    const CACHE_DURATION_MS = 1 * 60 * 1000; 
+
+    const now = Date.now();
+
+    // 检查缓存是否有效
+    if (tokenCache.token && now < tokenCache.expires) {
+        console.log("✅ 使用缓存的匿名 token");
+        return tokenCache.token;
+    }
+
+    // 如果缓存不存在或已过期，获取新的 token
+    console.log("🔄 缓存失效或不存在，正在获取新的匿名 token...");
+    const newToken = await fetchNewAnonymousToken();
+    
+    // 更新缓存
+    tokenCache.token = newToken;
+    tokenCache.expires = now + CACHE_DURATION_MS;
+    console.log(`缓存已更新，将在 ${new Date(tokenCache.expires).toLocaleTimeString()} 过期`);
+    
+    return newToken;
+}
+
+// --- 关键：添加匿名token获取功能 ---
+async function getAnonymousToken_() {
     try {
         const response = await fetch("https://chat.z.ai/api/v1/auths/", {
             method: "GET",
